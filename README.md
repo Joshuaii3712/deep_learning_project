@@ -148,7 +148,7 @@ The full pipeline is implemented as a **LangGraph** state machine with six seque
 │   └────────┬─────────────┘                                      │
 │            ↓                                                    │
 │   ┌──────────────────┐                                          │
-│   │ StateUpdateNode  │  ← EMA: ψ_t = αψ_{t-1} + (1-α)ψ̂_t    │
+│   │ StateUpdateNode  │  ← EMA: ψ_t = αψ_{t-1} + (1-α)ψ̂_t        │
 │   └────────┬─────────┘                                          │
 │            ↓                                                    │
 │   ┌────────────────────────┐                                    │
