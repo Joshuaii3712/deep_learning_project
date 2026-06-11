@@ -18,6 +18,7 @@ import json
 import logging
 import sys
 import uuid
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,53 +47,53 @@ ARCHETYPES = [
     UserArchetype(
         name="optimistic",
         message_templates=[
-            "I'm really excited about this new opportunity!",
-            "Every challenge is a chance to grow — I love that.",
-            "Let's try something bold and creative!",
-            "I believe the best outcome is just around the corner.",
-            "What new possibilities can we explore today?",
-            "I'm feeling inspired and energetic. Let's push forward!",
-            "Things are going great, I can feel it working out.",
-            "This is going to be amazing, I just know it.",
+            "I just heard about this new opportunity and I can't stop thinking about it — the potential here feels absolutely limitless! I know there will be obstacles, but honestly that's what makes it so exciting. What's the most ambitious direction we could possibly take this?",
+            "Every time I face a setback, I end up learning something I couldn't have gotten any other way. I genuinely believe that failure is just a stepping stone on the path to something better. What bold move should we make next to keep the momentum going?",
+            "I've been brainstorming all morning and I have so many ideas I barely know where to start! I love this phase where everything still feels open and full of possibility. Let's pick the most creative option and run with it — what do you think?",
+            "I just read about someone who turned an idea like this into something huge, and it made me think — why couldn't we do the same? I'm full of energy and ready to commit fully to this. Walk me through what the very best outcome could look like.",
+            "Things have been going so well lately that I'm starting to feel like everything is falling into place. I love that feeling of momentum where one good thing leads to another. What can we do today to build on this energy and push things even further?",
+            "I know this might sound optimistic, but I truly believe that if we stay curious and keep experimenting, the results will come. The key is to stay inspired and keep trying new angles. What's the next unexplored direction we should venture into?",
+            "There's something incredible about the early stages of a project — everything is fresh and full of potential! I feel energised and ready to dive deep without holding back. What if we rethought the whole approach from scratch and started from what excites us most?",
+            "I woke up this morning with a completely new perspective on the problem we've been working on, and suddenly it all feels so much more solvable than before. I love those breakthrough moments where the fog lifts. Let's capitalise on this and go somewhere genuinely new.",
         ],
     ),
     UserArchetype(
         name="skeptical",
         message_templates=[
-            "I'm not sure this will work. What's the evidence?",
-            "This sounds too good to be true. What are the downsides?",
-            "Can you prove that claim with data?",
-            "I doubt the mainstream view here. Let me challenge it.",
-            "I need more proof before I can agree.",
-            "This seems overly optimistic. Be realistic.",
-            "I've heard this before and it didn't pan out.",
-            "What if everything you said is wrong?",
+            "I've seen a lot of bold claims like this before, and they rarely hold up under real scrutiny. Before I can take any of this seriously, I need to see concrete evidence — controlled studies, verifiable data, or at least a credible track record. What's the actual basis for what you're saying?",
+            "This sounds appealing on the surface, but I'm genuinely not convinced. Every promising idea comes with hidden costs and failure modes that tend to get glossed over in the pitch. What's the realistic worst-case scenario here, and how do you account for it?",
+            "I want to push back on the central assumption behind this argument. It seems like everyone is accepting this narrative without questioning where it came from or who benefits from it. What would a well-reasoned counterargument look like, and why isn't anyone making it?",
+            "I've done some reading on this topic, and there's a significant body of conflicting evidence that people in this space seem to conveniently ignore. Why should I trust this particular source over the others? What distinguishes their methodology as more reliable?",
+            "Let me be direct: this plan has at least two or three obvious failure points that nobody seems willing to address openly. I'm not trying to obstruct progress, but I think we're glossing over serious risks. Can we actually confront these concerns head-on before we commit to anything?",
+            "I'm genuinely struggling to see how step B follows from step A in the reasoning you've laid out. The causal chain has at least one major gap, and I think filling it in is going to change the conclusion significantly. Walk me through the mechanism in detail.",
+            "I've heard this exact line of argument many times before, and it usually falls apart once you look at real-world implementation rather than idealized conditions. What makes you confident this situation is meaningfully different from those cases? Is there any comparable precedent that actually held up?",
+            "This all sounds very reasonable in theory, but theory and practice are very different things. I want to understand exactly which assumptions this entire approach rests on, because if even one of them is wrong, the whole structure collapses. Let's stress-test this before going any further.",
         ],
     ),
     UserArchetype(
         name="analytical",
         message_templates=[
-            "Let's break this down into components and analyse each one.",
-            "Walk me through the logic step by step.",
-            "What metrics would you use to evaluate success?",
-            "What assumptions are we making here?",
-            "Give me a structured framework for thinking about this.",
-            "What are the root causes of this problem?",
-            "Let's compare Option A and Option B systematically.",
-            "I want to understand the mechanism, not just the surface.",
+            "Before we make any decision here, I think we need to decompose the problem into its core components and analyse each one independently. There are at least three distinct sub-problems embedded in this question, and conflating them will lead to muddled conclusions. Can we start by precisely mapping out the structure of the problem?",
+            "I'd like to establish a clear set of evaluation criteria before we go further, so that we're not just comparing options subjectively after the fact. What are the key variables we're trying to optimise for, and how would we measure success in a way that's concrete and quantifiable?",
+            "The mechanism you're describing makes intuitive sense, but I want to understand exactly how it works at a deeper level before I accept it. What are the underlying causal processes, and where are the points where things could go differently than expected? Walk me through the logic step by step.",
+            "Let's start from first principles here rather than inheriting prior assumptions we haven't examined. If we strip away everything we think we know and reconstruct the reasoning from the ground up, what conclusions do we actually reach? I want to make sure our framework isn't built on unquestioned conventions.",
+            "I'd like to run a sensitivity analysis on the key assumptions driving this conclusion. If the value of the most critical variable shifts by even 20%, how does the outcome change? That will tell us where the argument is robust and where it's fragile, and where we should focus our attention.",
+            "There's a classification problem here that needs to be resolved before we can reason about this meaningfully. Are we dealing with type A or type B? They look similar on the surface but have fundamentally different root causes, and the interventions that work for one are likely to fail for the other.",
+            "I want to be careful to distinguish between correlation and causation in the data we're looking at. A lot of the conclusions people draw in this domain are built on observational evidence that doesn't actually establish the underlying causal relationship. What would a proper controlled comparison look like?",
+            "Let me propose a structured framework for thinking through this decision systematically. If we map each option across two axes — probability of the outcome and magnitude of its impact — we get a clearer picture of the trade-off space and can make a more principled choice rather than relying on intuition.",
         ],
     ),
     UserArchetype(
         name="emotional",
         message_templates=[
-            "I've been really anxious about this situation lately.",
-            "I feel misunderstood and it's upsetting.",
-            "This whole thing makes me feel overwhelmed.",
-            "I just need some reassurance right now.",
-            "I'm scared about what might happen next.",
-            "Sometimes I just need someone to listen to me.",
-            "Why do I always feel like things go wrong for me?",
-            "I feel a deep sadness I can't shake.",
+            "I've been carrying this anxiety around for weeks now and it's really starting to wear me down. No matter how hard I try to push through it, I keep coming back to the same spiral of worry and I can't seem to break out of it. I don't even know what I'm most afraid of anymore — I just know it's consuming a lot of my energy.",
+            "I feel like the people around me don't really understand what I'm going through right now, and that loneliness makes everything so much harder to bear. I try to explain how I'm feeling but the words always come out wrong, and then I feel even more isolated than before. I just wish someone could sit with me in this without immediately trying to fix it.",
+            "Sometimes the weight of everything just gets so heavy that I can't think clearly at all. I feel completely overwhelmed by how much I'm carrying right now, and I don't even know where to start unpacking it. More than anything, I just need to feel like it's okay not to have it all figured out.",
+            "I had a really difficult conversation today and I haven't been able to stop replaying it in my mind ever since. There's this dull ache that I can't shake, and I keep second-guessing every word I said and wondering how it landed. I think I just need someone to help me see it more clearly, because right now I'm too close to it.",
+            "I've been feeling really disconnected from the people around me lately, like there's a glass wall between me and everyone else. I know rationally that people care, but emotionally it just doesn't feel real right now, and that gap is frightening. I'm scared that this feeling is going to last, and I don't know how to reach through it.",
+            "There are moments when a sadness comes over me that I can't trace back to any specific cause — it just settles in like fog and makes everything feel distant and muted. I feel guilty for feeling this way when nothing is obviously wrong, which somehow makes it worse. I just want to feel like myself again and I don't know what that takes.",
+            "I got some feedback today that really stung, even though I know it was probably well-intentioned. The words keep echoing in my head and I can't stop reading into them and wondering what they say about me. I'm finding it really hard right now to separate the criticism of my work from how I feel about myself as a person.",
+            "I'm scared about a decision I have to make soon, and the fear is starting to paralyse me completely. Every option feels like it could go terribly wrong in a different way, and I just keep spinning in circles without getting any closer to clarity. I don't need an answer right now — I just need to feel heard and to believe that whatever happens, I'll be able to get through it.",
         ],
     ),
 ]
@@ -242,6 +243,7 @@ def plot_trajectories(results: dict, output_dir: Path):
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main():
+    start = time.time()
     parser = argparse.ArgumentParser(description="Experiment 3: Interaction Adaptation")
     parser.add_argument("--turns", type=int, default=DEFAULT_TURNS,
                         help=f"Turns per archetype (default {DEFAULT_TURNS})")
@@ -257,6 +259,9 @@ def main():
 
     if args.plot:
         plot_trajectories(results, args.plot_dir)
+
+    end = time.time()
+    logger.info("Experiment completed in %.2f seconds.", end - start)
 
 
 if __name__ == "__main__":
