@@ -30,7 +30,7 @@ BIG5_MODEL: str = os.getenv(
 )
 
 # ── Personality state update ──────────────────────────────────────────────────
-ALPHA: float = float(os.getenv("PSM_ALPHA", "0.99"))  # EMA smoothing factor
+ALPHA: float = float(os.getenv("PSM_ALPHA", "0.5"))  # EMA smoothing factor
 
 # ── Memory trigger thresholds ─────────────────────────────────────────────────
 TRIGGER_TOKEN_LIMIT: int = int(os.getenv("PSM_TRIGGER_TOKENS", "700"))

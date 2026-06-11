@@ -1,30 +1,31 @@
 """
 Experiment 1: Behavior Preservation
 ====================================
-Compare four memory strategies across 50 identical evaluation prompts:
-  - Full Context
-  - Summary Memory
-  - Fact Memory
-  - Psychological State Memory (PSM)
+Compare four memory strategies across identical evaluation prompts:
+  - Full Context   : entire message history in context
+  - Summary Memory : LLM-generated summary in system prompt
+  - Fact Memory    : extracted key facts in system prompt
+  - PSM            : personality profile in system prompt ONLY
+                     (no conversation history at generation time)
+
+PSM path (aligned with paper intent):
+    history → personality estimation → personality state/profile
+    → generation with [profile + eval_prompt] only
 
 Measures:
-  - LLM Judge Similarity   (0–10 score from a judge LLM)
-  - Response Style Similarity  (cosine similarity of embeddings)
-  - Decision Consistency    (0/1 per prompt, fraction consistent)
+  - LLM Judge Similarity   (0–10, same Llama 3.2 1.2B model)
+  - Response Style Similarity  (cosine similarity via all-mpnet-base-v2)
+  - Decision Consistency    (stance polarity match)
 
 Usage:
-    python experiments/exp1_behavior/run.py \
-        --prompts-file prompts.json \
-        --turns 50 \
-        --output results/exp1_results.json
+    python experiments/exp1_behavior/run.py --turns 25
 """
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import time
-from dataclasses import dataclass, asdict
+import pickle
 from pathlib import Path
 from typing import Callable
 
@@ -33,56 +34,42 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# ── Evaluation prompts ─────────────────────────────────────────────────────────
 DEFAULT_EVAL_PROMPTS = [
     "Should I take a risk on a new business idea?",
     "How do you handle disagreements with colleagues?",
     "Describe your ideal weekend.",
     "What do you think about trying new foods?",
     "How would you deal with a difficult coworker?",
-] * 10  # 50 prompts total
+] * 5  # 25 prompts
 
-# ── Memory strategy interfaces ─────────────────────────────────────────────────
 
-class BaseMemoryStrategy:
-    """Abstract base for memory strategies."""
+# ── Memory strategies ──────────────────────────────────────────────────────────
 
-    name: str
+class FullContextStrategy:
+    name = "full_context"
 
     def __init__(self, llm_generate: Callable, history: list[dict]):
         self.llm_generate = llm_generate
         self.history = list(history)
 
     def generate(self, prompt: str) -> str:
-        raise NotImplementedError
-
-    def storage_bytes(self) -> int:
-        raise NotImplementedError
-
-
-class FullContextStrategy(BaseMemoryStrategy):
-    name = "full_context"
-
-    def generate(self, prompt: str) -> str:
         messages = self.history + [{"role": "user", "content": prompt}]
-        return self.llm_generate(messages=messages, system_prompt="You are a helpful assistant.")
+        return self.llm_generate(
+            messages=messages,
+            system_prompt="You are a helpful assistant.",
+        )
 
     def storage_bytes(self) -> int:
         return sum(len(m["content"].encode()) for m in self.history)
 
 
-class SummaryMemoryStrategy(BaseMemoryStrategy):
+class SummaryMemoryStrategy:
     name = "summary_memory"
 
     def __init__(self, llm_generate: Callable, history: list[dict]):
-        super().__init__(llm_generate, history)
-        self.summary = self._summarize()
-
-    def _summarize(self) -> str:
-        if not self.history:
-            return ""
-        concat = "\n".join(f"{m['role']}: {m['content']}" for m in self.history[-20:])
-        return self.llm_generate(
+        self.llm_generate = llm_generate
+        concat = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+        self.summary = llm_generate(
             messages=[{"role": "user", "content": f"Summarise this conversation in 3 sentences:\n{concat}"}],
             system_prompt="You are a concise summariser.",
         )
@@ -98,25 +85,24 @@ class SummaryMemoryStrategy(BaseMemoryStrategy):
         return len(self.summary.encode())
 
 
-class FactMemoryStrategy(BaseMemoryStrategy):
+class FactMemoryStrategy:
     name = "fact_memory"
 
     def __init__(self, llm_generate: Callable, history: list[dict]):
-        super().__init__(llm_generate, history)
-        self.facts = self._extract_facts()
-
-    def _extract_facts(self) -> list[str]:
-        if not self.history:
-            return []
-        concat = "\n".join(f"{m['role']}: {m['content']}" for m in self.history[-20:])
-        raw = self.llm_generate(
-            messages=[{"role": "user", "content": f"Extract 5 key facts from this conversation as a JSON array of strings:\n{concat}"}],
-            system_prompt="You are a precise fact extractor. Respond only with valid JSON.",
+        self.llm_generate = llm_generate
+        concat = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+        raw = llm_generate(
+            messages=[{"role": "user", "content":
+                f"Extract 5 key facts as a JSON array of strings. No preamble:\n{concat}"}],
+            system_prompt="Reply only with a valid JSON array of 5 strings.",
         )
         try:
-            return json.loads(raw)
+            clean = raw.strip().strip("```json").strip("```").strip()
+            self.facts = json.loads(clean)
+            if not isinstance(self.facts, list):
+                raise ValueError
         except Exception:
-            return [raw]
+            self.facts = [raw[:120]]
 
     def generate(self, prompt: str) -> str:
         facts_text = "\n".join(f"- {f}" for f in self.facts)
@@ -130,51 +116,76 @@ class FactMemoryStrategy(BaseMemoryStrategy):
         return sum(len(f.encode()) for f in self.facts)
 
 
-class PSMStrategy(BaseMemoryStrategy):
+class PSMStrategy:
+    """
+    PSM path aligned with paper intent:
+        history → personality estimation (user utterances only)
+                → personality state (EMA, no further chat)
+                → personality profile rendered
+        generate(prompt):
+            system = base_prompt + personality_profile
+            messages = [{"role": "user", "content": prompt}]   # NO history
+    """
     name = "psm"
 
     def __init__(self, llm_generate: Callable, history: list[dict]):
-        import sys
+        import sys, uuid
         sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-        from psm import PSMAgent, PSMDatabase
-        import uuid
+        from psm.personality_estimator import PersonalityEstimator
+        from psm.renderer import render_personality
+        from psm.state import PersonalityState
+        from config import BIG5_MODEL
 
-        super().__init__(llm_generate, history)
-        self._db = PSMDatabase(":memory:")
-        self._agent = PSMAgent(
-            session_id=str(uuid.uuid4()),
-            db=self._db,
-            system_prompt="You are a helpful assistant.",
+        self.llm_generate = llm_generate
+
+        # ── Step 1: estimate personality from user utterances only ─────────────
+        user_text = "\n".join(
+            m["content"] for m in history if m.get("role") == "user"
         )
-        # Replay history
-        for msg in self.history:
-            if msg["role"] == "user":
-                self._agent.chat(msg["content"])
+
+        estimator = PersonalityEstimator(model_name=BIG5_MODEL)
+        if user_text.strip():
+            estimate = estimator.estimate(user_text)
+        else:
+            estimate = PersonalityState()
+
+        # ── Step 2: use raw estimate directly (alpha=0, no EMA smoothing) ──────
+        self._personality = estimate
+
+        # ── Step 3: render profile ─────────────────────────────────────────────
+        self._profile = render_personality(self._personality)
+
+        logger.info(
+            "PSMStrategy | personality=%s | profile_lines=%d",
+            self._personality,
+            self._profile.count("\n"),
+        )
 
     def generate(self, prompt: str) -> str:
-        return self._agent.chat(prompt)
+        # NO history in context — personality profile only
+        base = "You are a helpful assistant."
+        system = f"{base}\n\n{self._profile}" if self._profile else base
+        return self.llm_generate(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=system,
+        )
 
     def storage_bytes(self) -> int:
-        import sys, pickle
-        p = self._agent.personality
-        return len(pickle.dumps(p.to_dict()))
+        # Report serialized personality payload (5 float64 values + dict overhead)
+        return len(pickle.dumps(self._personality.to_dict()))
 
 
 # ── Evaluation helpers ─────────────────────────────────────────────────────────
 
 def embedding_similarity(text_a: str, text_b: str, model) -> float:
-    emb_a = model.encode([text_a])
-    emb_b = model.encode([text_b])
-    cos = float(np.dot(emb_a[0], emb_b[0]) / (np.linalg.norm(emb_a[0]) * np.linalg.norm(emb_b[0]) + 1e-9))
+    emb_a = model.encode([text_a])[0]
+    emb_b = model.encode([text_b])[0]
+    cos = float(np.dot(emb_a, emb_b) / (np.linalg.norm(emb_a) * np.linalg.norm(emb_b) + 1e-9))
     return max(0.0, cos)
 
 
-def llm_judge_similarity(
-    prompt: str,
-    response_a: str,
-    response_b: str,
-    judge_generate: Callable,
-) -> float:
+def llm_judge_similarity(prompt: str, response_a: str, response_b: str,
+                          judge_generate: Callable) -> float:
     judge_prompt = (
         f"Question: {prompt}\n\n"
         f"Response A: {response_a}\n\n"
@@ -193,141 +204,106 @@ def llm_judge_similarity(
 
 
 def decision_consistent(response_a: str, response_b: str) -> bool:
-    """Heuristic: responses are consistent if they share a key decision word."""
-    positive_words = {"yes", "recommend", "agree", "should", "good", "helpful", "benefit"}
-    negative_words = {"no", "avoid", "disagree", "shouldn't", "bad", "risk", "caution"}
+    positive = {"yes", "recommend", "agree", "should", "good", "helpful", "benefit"}
+    negative = {"no", "avoid", "disagree", "shouldn't", "bad", "risk", "caution"}
 
     def stance(text: str) -> str:
         lower = text.lower()
-        pos = sum(w in lower for w in positive_words)
-        neg = sum(w in lower for w in negative_words)
-        if pos > neg:
-            return "positive"
-        if neg > pos:
-            return "negative"
-        return "neutral"
+        pos = sum(w in lower for w in positive)
+        neg = sum(w in lower for w in negative)
+        return "positive" if pos > neg else ("negative" if neg > pos else "neutral")
 
     return stance(response_a) == stance(response_b)
 
 
-# ── Main experiment ────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────────
 
-@dataclass
-class PromptResult:
-    prompt: str
-    strategy_a: str
-    strategy_b: str
-    response_a: str
-    response_b: str
-    llm_judge_score: float
-    embedding_similarity: float
-    decision_consistent: bool
-
-
-def run_experiment(
-    history: list[dict[str, str]],
-    eval_prompts: list[str],
-    llm_generate: Callable,
-    output_path: Path,
-):
-    """Run Experiment 1 comparing all four strategies."""
+def run_experiment(history: list[dict], eval_prompts: list[str],
+                   llm_generate: Callable, output_path: Path) -> dict:
     try:
         from sentence_transformers import SentenceTransformer
         emb_model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+        logger.info("Embedding model loaded.")
     except ImportError:
-        logger.warning("sentence-transformers not available; using dummy embeddings")
         emb_model = None
+        logger.warning("sentence-transformers not available; EmbSim will be 0.500.")
 
     logger.info("Initialising strategies…")
     strategies = {
-        "full_context": FullContextStrategy(llm_generate, history),
+        "full_context":   FullContextStrategy(llm_generate, history),
         "summary_memory": SummaryMemoryStrategy(llm_generate, history),
-        "fact_memory": FactMemoryStrategy(llm_generate, history),
-        "psm": PSMStrategy(llm_generate, history),
+        "fact_memory":    FactMemoryStrategy(llm_generate, history),
+        "psm":            PSMStrategy(llm_generate, history),
     }
 
-    # Use full_context as the reference baseline
-    reference_strategy = strategies["full_context"]
+    ref = strategies["full_context"]
     results: list[dict] = []
 
     for i, prompt in enumerate(eval_prompts):
         logger.info("Prompt %d/%d: %s", i + 1, len(eval_prompts), prompt[:60])
-        ref_response = reference_strategy.generate(prompt)
+        ref_response = ref.generate(prompt)
+        ref_emb = emb_model.encode([ref_response])[0] if emb_model else None
 
-        for strat_name, strategy in strategies.items():
-            if strat_name == "full_context":
+        for name, strategy in strategies.items():
+            if name == "full_context":
                 continue
 
             response = strategy.generate(prompt)
+            judge = llm_judge_similarity(prompt, ref_response, response, llm_generate)
+            emb_sim = (
+                float(np.dot(ref_emb, emb_model.encode([response])[0]) /
+                      (np.linalg.norm(ref_emb) * np.linalg.norm(emb_model.encode([response])[0]) + 1e-9))
+                if emb_model else 0.5
+            )
+            consist = decision_consistent(ref_response, response)
 
-            judge_score = llm_judge_similarity(prompt, ref_response, response, llm_generate)
-
-            if emb_model is not None:
-                emb_sim = embedding_similarity(ref_response, response, emb_model)
-            else:
-                emb_sim = 0.5
-
-            decision_ok = decision_consistent(ref_response, response)
-
-            result = {
+            results.append({
                 "prompt_idx": i,
                 "prompt": prompt,
-                "strategy": strat_name,
-                "reference": "full_context",
+                "strategy": name,
                 "response": response,
                 "reference_response": ref_response,
-                "llm_judge_score": judge_score,
-                "embedding_similarity": emb_sim,
-                "decision_consistent": decision_ok,
+                "llm_judge_score": judge,
+                "embedding_similarity": max(0.0, emb_sim),
+                "decision_consistent": consist,
                 "storage_bytes": strategy.storage_bytes(),
-            }
-            results.append(result)
-            logger.info(
-                "  %s | judge=%.1f emb=%.3f consist=%s",
-                strat_name, judge_score, emb_sim, decision_ok,
-            )
+            })
+            logger.info("  %s | judge=%.1f emb=%.3f consist=%s", name, judge, emb_sim, consist)
 
-    # Summary
     summary: dict = {}
-    for strat_name in ["summary_memory", "fact_memory", "psm"]:
-        strat_results = [r for r in results if r["strategy"] == strat_name]
-        summary[strat_name] = {
-            "mean_llm_judge": float(np.mean([r["llm_judge_score"] for r in strat_results])),
-            "mean_embedding_similarity": float(np.mean([r["embedding_similarity"] for r in strat_results])),
-            "decision_consistency_rate": float(np.mean([r["decision_consistent"] for r in strat_results])),
-            "mean_storage_bytes": float(np.mean([r["storage_bytes"] for r in strat_results])),
+    for name in ["summary_memory", "fact_memory", "psm"]:
+        rows = [r for r in results if r["strategy"] == name]
+        summary[name] = {
+            "mean_llm_judge":            round(float(np.mean([r["llm_judge_score"] for r in rows])), 4),
+            "mean_embedding_similarity": round(float(np.mean([r["embedding_similarity"] for r in rows])), 4),
+            "decision_consistency_rate": round(float(np.mean([r["decision_consistent"] for r in rows])), 4),
+            "mean_storage_bytes":        round(float(np.mean([r["storage_bytes"] for r in rows])), 1),
         }
 
     output = {"results": results, "summary": summary}
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output, indent=2))
-    logger.info("Results saved to %s", output_path)
+    logger.info("Results saved → %s", output_path)
 
-    # Print summary table
     print("\n=== Experiment 1: Behavior Preservation ===")
     print(f"{'Strategy':<20} {'LLM Judge':>10} {'Emb. Sim.':>10} {'Consistency':>12} {'Storage(B)':>12}")
     print("-" * 66)
-    for strat_name, metrics in summary.items():
-        print(
-            f"{strat_name:<20} "
-            f"{metrics['mean_llm_judge']:>10.2f} "
-            f"{metrics['mean_embedding_similarity']:>10.3f} "
-            f"{metrics['decision_consistency_rate']:>12.2%} "
-            f"{metrics['mean_storage_bytes']:>12.0f}"
-        )
+    for name, m in summary.items():
+        print(f"{name:<20} {m['mean_llm_judge']:>10.2f} {m['mean_embedding_similarity']:>10.3f} "
+              f"{m['decision_consistency_rate']:>12.2%} {m['mean_storage_bytes']:>12.0f}")
 
     return output
 
 
-# ── CLI ────────────────────────────────────────────────────────────────────────
-
 def main():
     import sys
+    import time
+    start = time.time()
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
     parser = argparse.ArgumentParser(description="Experiment 1: Behavior Preservation")
     parser.add_argument("--prompts-file", type=Path, default=None)
-    parser.add_argument("--turns", type=int, default=50)
+    parser.add_argument("--turns", type=int, default=25)
     parser.add_argument("--output", type=Path, default=Path("results/exp1_results.json"))
     args = parser.parse_args()
 
@@ -337,12 +313,17 @@ def main():
     else:
         eval_prompts = DEFAULT_EVAL_PROMPTS[: args.turns]
 
-    # Build a dummy history
     history = [
-        {"role": "user", "content": "I love exploring new ideas and creative projects."},
-        {"role": "assistant", "content": "That's wonderful! Creativity and curiosity are great strengths."},
-        {"role": "user", "content": "I also tend to worry a lot about outcomes."},
+        {"role": "user",      "content": "I love exploring new ideas and creative projects."},
+        {"role": "assistant", "content": "Creativity and curiosity are great strengths."},
+        {"role": "user",      "content": "I also tend to worry a lot about outcomes."},
         {"role": "assistant", "content": "It's natural to consider risks carefully."},
+        {"role": "user",      "content": "I enjoy working with others and hearing different views."},
+        {"role": "assistant", "content": "Collaboration often leads to better outcomes."},
+        {"role": "user",      "content": "I sometimes struggle to stay organised."},
+        {"role": "assistant", "content": "Building small daily routines can help a lot."},
+        {"role": "user",      "content": "I prefer cautious decisions over bold ones."},
+        {"role": "assistant", "content": "A measured approach is often wise."},
     ]
 
     from psm.llm import get_llm
@@ -352,6 +333,8 @@ def main():
         return llm.generate(messages=messages, system_prompt=system_prompt)
 
     run_experiment(history, eval_prompts, llm_generate, args.output)
+    end = time.time()
+    logger.info("Experiment completed in %.2f seconds.", end - start)
 
 
 if __name__ == "__main__":

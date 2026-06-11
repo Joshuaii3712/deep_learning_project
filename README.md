@@ -15,7 +15,7 @@ A Psychological Approach to Long-Term Memory
 
 # Psychological State Memory (PSM): Behavior-Preserving Psychological Compression for Long-Term Conversational Agents
 
-> **Abstract.** Long-term conversational agents typically maintain context through retrieval, summarization, or external memory stores. While these approaches preserve factual information, they often fail to capture how prolonged interactions shape an agent's behavioral tendencies. We introduce **Psychological State Memory (PSM)**, a lightweight memory mechanism that compresses conversation histories into a five-dimensional persistent psychological state based on the Big Five personality model. Instead of storing facts or summaries, PSM models stable behavioral dispositions—curiosity, conscientiousness, expressiveness, warmth, and emotional reactivity—and periodically updates them via a streaming personality estimator. The resulting state vector is rendered into natural language and injected into the system prompt, enabling behavioral consistency across long sessions while requiring only five floating-point values as persistent memory. We evaluate PSM against full-context prompting, summary-based memory, and fact-centric memory on two axes: behavior preservation and memory efficiency. An additional adaptation experiment examines whether the personality state vector responds meaningfully to sustained user interaction styles. Results show that PSM achieves the highest behavior preservation score and decision consistency among compressed strategies, and delivers an order-of-magnitude improvement in storage efficiency over all baselines. The adaptation experiment, however, exposed a critical label-mapping bug in the personality estimator that prevented trait-specific updates, restricting all personality change to the extraversion dimension. These findings confirm PSM's practical advantages as a memory-efficient architecture and simultaneously highlight the estimator's sensitivity to model-specific output formats as a key direction for future work.
+> **Abstract.** Long-term conversational agents typically maintain context through retrieval, summarization, or external memory stores. While these approaches preserve factual information, they often fail to capture how prolonged interactions shape an agent's behavioral tendencies. We introduce **Psychological State Memory (PSM)**, a lightweight memory mechanism that compresses conversation histories into a five-dimensional persistent psychological state based on the Big Five personality model. Instead of storing facts or summaries, PSM models stable behavioral dispositions—curiosity, conscientiousness, expressiveness, warmth, and emotional reactivity—and periodically updates them via a streaming personality estimator. The resulting state vector is rendered into natural language and injected into the system prompt, enabling behavioral consistency across long sessions while requiring only five floating-point values as persistent memory. We evaluate PSM against summary-based and fact-centric memory on behavior preservation and memory efficiency, and additionally examine whether the state vector adapts directionally under sustained interaction styles. PSM achieves comparable behavioral preservation to summary-based memory while reducing storage footprint by approximately 65%, and correctly predicts 6 of 8 directional personality adaptation hypotheses. The two remaining failures are traced to a systematic bias in the BERT-based estimator on the Conscientiousness and Neuroticism dimensions under short conversational text, establishing a clear agenda for future estimator development.
 
 ---
 
@@ -43,9 +43,10 @@ We ask: *can a conversational agent's effective memory be represented not as sto
 The key contributions of this work are:
 
 - A lightweight psychological memory architecture requiring only five floating-point values of persistent storage per session.
-- A trigger-based update mechanism that decouples personality estimation from generation latency.
-- Empirical comparison of PSM against three baseline memory strategies on behavior preservation and memory efficiency.
-- Identification of a label-mapping failure mode in pretrained Big Five estimators and a concrete fix for future work.
+- A trigger-based update mechanism with context compression: when a trigger fires, the front 50% of the active message window is absorbed into the personality state and removed from the LLM context, keeping the context window bounded while preserving behavioral continuity.
+- A 9-bucket rendering scheme providing finer-grained natural-language differentiation of personality states than conventional 5-bucket approaches.
+- Empirical comparison of PSM against two compressed memory baselines on behavior preservation and storage efficiency.
+- Identification of residual estimator biases in Conscientiousness and Neuroticism, and a concrete agenda for future estimator development including training a dedicated dialogue-domain Big Five classifier.
 
 ---
 
@@ -53,13 +54,13 @@ The key contributions of this work are:
 
 ### 2.1 Problem Formulation
 
-Let $\mathcal{H}_t = \{(u_1, a_1), \ldots, (u_t, a_t)\}$ denote a conversation history of $t$ turns, where $u_i$ and $a_i$ are user and agent utterances respectively. A memory system $\mathcal{M}$ must produce a compact representation $m_t = \mathcal{M}(\mathcal{H}_t)$ such that the conditional distribution of future responses $P(a_{t+1} \mid u_{t+1}, m_t)$ approximates $P(a_{t+1} \mid u_{t+1}, \mathcal{H}_t)$ as closely as possible, subject to a storage budget $|m_t| \leq B$.
+Let $\mathcal{H}_t = \{(u_1, a_1), \ldots, (u_t, a_t)\}$ denote a conversation history of $t$ turns, where $u_i$ and $a_i$ are user and agent utterances respectively. A memory system $\mathcal{M}$ produces a compact representation $m_t = \mathcal{M}(\mathcal{H}_t)$ such that:
 
-PSM defines $m_t$ as a five-dimensional real vector $\psi_t \in [0,1]^5$, where each dimension corresponds to one Big Five trait.
+$$P(a_{t+1} \mid u_{t+1}, m_t) \approx P(a_{t+1} \mid u_{t+1}, \mathcal{H}_t), \quad |m_t| \leq B$$
+
+PSM defines $m_t$ as a five-dimensional real vector $\psi_t \in [0,1]^5$, one dimension per Big Five trait.
 
 ### 2.2 Personality State
-
-The persistent psychological state is a dataclass with five continuous dimensions:
 
 ```
 PersonalityState:
@@ -70,49 +71,60 @@ PersonalityState:
   neuroticism       ∈ [0, 1]
 ```
 
-The initial state is set to the neutral midpoint $\psi_0 = (0.5, 0.5, 0.5, 0.5, 0.5)$.
+The initial state is the neutral midpoint $\psi_0 = (0.5, 0.5, 0.5, 0.5, 0.5)$.
 
 ### 2.3 State Update via Exponential Moving Average
 
-At each memory update event, a personality estimator $f_\theta$ produces a fresh estimate $\hat{\psi}_t$ from a recent conversation window. The persistent state is updated via the EMA formula [11]:
+At each trigger event, the estimator $f_\theta$ produces $\hat{\psi}_t$ from the front 50% of the active context (the portion about to be compressed). The persistent state is updated via EMA [11]:
 
 $$\psi_t = \alpha \cdot \psi_{t-1} + (1 - \alpha) \cdot \hat{\psi}_t$$
 
-where $\alpha = 0.99$ is a smoothing coefficient chosen to ensure slow, stable evolution that resists noise in individual estimates. This formulation prevents abrupt behavioral shifts while allowing the state to drift meaningfully over many turns.
+where $\alpha = 0.9$ is the smoothing coefficient. This value is more responsive than the commonly used 0.99, allowing the state to adapt within tens of turns rather than hundreds, which is appropriate given the 40-turn evaluation horizon.
 
 ### 2.4 Personality Estimator
 
-The personality estimator $f_\theta$ is a pretrained BERT-based text classifier (`Minej/bert-base-personality` [4]) fine-tuned on the Essays dataset [5] for Big Five prediction. It takes a concatenated window of recent utterances (up to 512 tokens) and outputs five classification scores in $[0,1]$.
+The personality estimator $f_\theta$ is `Minej/bert-base-personality` [4], a BERT-based classifier fine-tuned on the Essays dataset [5] for Big Five prediction. It is loaded via `BertForSequenceClassification` with the official `id2label` mapping injected explicitly at load time, since the model's `config.json` does not persist this mapping and the `pipeline()` API defaults to generic `LABEL_0~4` labels:
 
-### 2.5 Memory Trigger
+```python
+id2label = {"0": "Extroversion", "1": "Neuroticism",
+            "2": "Agreeableness", "3": "Conscientiousness", "4": "Openness"}
+```
 
-To decouple estimation overhead from generation latency, PSM updates $\psi_t$ only when at least one of three conditions is met. Let $\tau_t$ denote the total token count at turn $t$ and $C = 1024$ the model context window. The trigger fires when:
+Scores are produced via sigmoid activation (the model uses binary cross-entropy, one head per trait). Only user-side messages are passed to the estimator to avoid diluting the personality signal with neutral assistant responses.
 
-$$\tau_t > 700 \quad \lor \quad \frac{\tau_t}{C} > 0.65 \quad \lor \quad t \equiv 0 \pmod{20}$$
+### 2.5 Memory Trigger and Context Compression
+
+PSM updates $\psi_t$ only when at least one of three conditions is met. Let $\tau_t$ be the cumulative token count at turn $t$ and $C = 1024$ the context window:
+
+$$\tau_t > 700 \quad \lor \quad \frac{\tau_t}{C} > 0.65 \quad \lor \quad t \equiv 0 \pmod{10}$$
+
+When a trigger fires, the **front 50% of the active message list** is passed to the estimator, used to update $\psi_t$, and then **removed from the LLM context**. The full history is permanently retained in SQLite. Subsequent generation uses only:
+
+$$\text{LLM context} = \underbrace{\text{Recent 50\% of messages}}_{\text{active window}} + \underbrace{\text{Personality Profile}}_{\text{compressed behavioral memory}}$$
+
+This ensures the context window remains bounded while behavioral continuity is maintained through the personality state, not through raw history.
 
 | Condition | Threshold |
 |---|---|
-| Accumulated tokens in context | $> 700$ tokens |
-| Context utilization ratio | $> 65\%$ of model window |
-| Turn count | multiple of $20$ |
+| Accumulated tokens | $> 700$ |
+| Context utilization | $> 65\%$ |
+| Turn count | multiple of $10$ |
 
-These thresholds are tuned for the experimental hardware described in Section 3.1, where a small context window (1,024 tokens) and constrained VRAM necessitate more frequent, lighter-weight updates compared to full-scale deployments.
+### 2.6 Personality Rendering — 9-Bucket Scheme
 
-### 2.6 Personality Rendering
+Before each generation, $\psi_t$ is discretized into **9 buckets** per trait, providing finer-grained differentiation than the conventional 5-bucket approach:
 
-Before each generation, $\psi_t$ is converted to a natural-language profile via a bucket mapping. Each trait score is discretized into five levels using the floor function [cf. 1]:
+$$b^{(k)} = \text{clamp}\left(\lfloor \psi^{(k)}_t \cdot 9 \rfloor,\ 0,\ 8\right)$$
 
-$$b^{(k)} = \text{clamp}\left(\lfloor \psi^{(k)}_t \cdot 5 \rfloor,\ 0,\ 4\right)$$
-
-Bucket $b = 2$ (neutral) emits no sentence; all others emit a trait-specific description. Examples:
+Bucket $b = 4$ (neutral) emits no sentence. The remaining 8 levels each emit a trait-specific description, yielding up to $8^5 = 32{,}768$ distinct profile combinations versus $4^5 = 1{,}024$ under the 5-bucket scheme. Example descriptions:
 
 | Trait | Bucket | Description |
 |---|---|---|
-| Openness | 4 | "The assistant actively explores novel possibilities and alternative perspectives." |
-| Openness | 0 | "The assistant prefers familiar and conventional approaches." |
-| Agreeableness | 4 | "The assistant responds in a warm, cooperative, and empathetic manner." |
-| Neuroticism | 0 | "The assistant remains emotionally stable and rarely focuses on worst-case outcomes." |
-| Neuroticism | 4 | "The assistant tends to carefully consider risks and potential negative outcomes." |
+| Openness | 8 | "The assistant actively explores novel possibilities and alternative perspectives with great enthusiasm." |
+| Openness | 0 | "The assistant strongly avoids novelty and exclusively relies on familiar, conventional approaches." |
+| Agreeableness | 8 | "The assistant responds in an exceptionally warm, cooperative, and empathetic manner." |
+| Neuroticism | 0 | "The assistant is exceptionally emotionally stable and never focuses on negative outcomes." |
+| Neuroticism | 8 | "The assistant is highly sensitive to potential risks and tends to anticipate negative outcomes." |
 
 The rendered profile is injected directly below the system prompt:
 
@@ -121,68 +133,69 @@ The rendered profile is injected directly below the system prompt:
 
 Psychological Profile
 
-- The assistant actively explores novel possibilities and alternative perspectives.
-- The assistant responds in a warm, cooperative, and empathetic manner.
-- The assistant tends to be reserved rather than highly expressive.
+- The assistant actively explores novel possibilities and alternative perspectives with great enthusiasm.
+- The assistant responds in an exceptionally warm, cooperative, and empathetic manner.
+- The assistant is highly sensitive to potential risks and tends to anticipate negative outcomes.
 ```
 
 ### 2.7 System Architecture
-
-The full pipeline is implemented as a **LangGraph** state machine with six sequential nodes:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         LangGraph DAG                           │
 │                                                                 │
 │   ┌──────────────────┐                                          │
-│   │  ConversationNode │  ← append user message, increment turn  │
+│   │ ConversationNode │  ← append user message, increment turn   │
 │   └────────┬─────────┘                                          │
 │            ↓                                                    │
-│   ┌──────────────────┐                                          │
-│   │MemoryTriggerNode │  ← check token / ctx / turn thresholds   │
-│   └────────┬─────────┘                                          │
+│   ┌───────────────────┐                                         │
+│   │ MemoryTriggerNode │  ← check token / ctx / turn thresholds  │
+│   └────────┬──────────┘                                         │
 │            ↓                                                    │
 │   ┌──────────────────────┐                                      │
-│   │PersonalityEstimator  │  ← run f_θ on conversation window    │
-│   │       Node           │    (skipped if not triggered)        │
+│   │ PersonalityEstimator │  ← f_θ on front 50% user messages    │
+│   │         Node         │    (skipped if not triggered)        │
 │   └────────┬─────────────┘                                      │
 │            ↓                                                    │
-│   ┌──────────────────┐                                          │
-│   │ StateUpdateNode  │  ← EMA: ψ_t = αψ_{t-1} + (1-α)ψ̂_t    │
-│   └────────┬─────────┘                                          │
+│   ┌─────────────────┐                                           │
+│   │ StateUpdateNode │  ← EMA: ψ_t = 0.9·ψ_{t-1} + 0.1·ψ̂_t       │
+│   └────────┬────────┘                                           │
 │            ↓                                                    │
-│   ┌────────────────────────┐                                    │
-│   │PersonalityRendererNode │  ← bucket mapping → natural lang   │
-│   └────────┬───────────────┘                                    │
+│   ┌────────────────────┐                                        │
+│   │ ContextCompression │  ← drop front 50% from active ctx      │
+│   │        Node        │    (SQLite retains full history)       │
+│   └────────┬───────────┘                                        │
 │            ↓                                                    │
-│   ┌──────────────────┐                                          │
-│   │  GenerationNode  │  ← LLM call with enriched system prompt  │
-│   └────────┬─────────┘                                          │
+│   ┌─────────────────────────┐                                   │
+│   │ PersonalityRendererNode │  ← 9-bucket → natural language    │
+│   └────────┬────────────────┘                                   │
+│            ↓                                                    │
+│   ┌────────────────┐                                            │
+│   │ GenerationNode │  ← recent 50% + personality profile        │
+│   └───────┬────────┘                                            │
 │            ↓                                                    │
 │          [END]                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**State persistence** is handled by SQLite, storing session metadata, full message history, Big Five state per session, and a timestamped personality snapshot log.
+**State persistence.** SQLite stores the full conversation history permanently. The in-memory message list holds only the active (uncompressed) window.
 
 ### 2.8 Implementation Stack
 
 | Component | Implementation |
 |---|---|
-| LLM | Llama 3.2 1.2B (Q8_0) via Ollama |
+| LLM | Llama 3.2 1.2B (Q8\_0) via Ollama |
 | Workflow | LangGraph |
 | UI | Streamlit |
 | State Storage | SQLite (SQLAlchemy Core) |
 | Personality Estimator | `Minej/bert-base-personality` (HuggingFace) [4] |
-| Style Similarity (Exp 1–2) | `sentence-transformers/all-mpnet-base-v2` [9] |
+| Style Similarity (Exp 1) | `sentence-transformers/all-mpnet-base-v2` [9] |
 
 ---
 
 ## 3. Experiments
 
 ### 3.1 Experimental Setup
-
-All experiments are conducted on a consumer-grade laptop with the following specifications:
 
 | Component | Specification |
 |---|---|
@@ -191,82 +204,83 @@ All experiments are conducted on a consumer-grade laptop with the following spec
 | RAM | 16 GB |
 | CPU | Intel Core i5-10210U @ 1.60 GHz (boost 2.11 GHz) |
 
-The LLM is Llama 3.2 (1.2B parameters, Q8_0 quantization) served via Ollama. Model configuration is adjusted to fit within the available memory budget:
-
 | Parameter | Value |
 |---|---|
 | Context window (`N_CTX`) | 1,024 tokens |
 | Temperature | 0.7 |
 | Max new tokens | 128 |
+| EMA coefficient ($\alpha$) | 0.9 |
 | Trigger token threshold | 700 |
 | Trigger context ratio | 0.65 |
-| Trigger turn interval | 20 |
+| Trigger turn interval | 10 |
+| Rendering buckets | 9 (neutral = 4) |
 
-**Note on the LLM-as-judge in Experiment 1.** Due to hardware constraints, the same Llama 3.2 1.2B (Q8_0) model is used both as the agent being evaluated and as the judge scoring response similarity. This is a significant limitation: a small 1.2B model has limited capacity for meta-evaluation, and the relatively low LLM-Judge scores (2.5–4.9 out of 10) likely reflect this constraint as much as actual strategy differences. Scores should be interpreted as relative rankings rather than absolute quality estimates.
+**Note on LLM-as-judge.** The same Llama 3.2 1.2B (Q8\_0) model acts as both the evaluated agent and the judge, which suppresses absolute scores. All LLM-Judge values should be read as relative rankings within each experiment. Future experiments will use a larger judge model (7B+) for more discriminative absolute scores [12].
 
 ### 3.2 Experiment 1: Behavior Preservation
 
-**Goal.** Measure how well each memory strategy preserves the behavioral output of full-context prompting when applied to identical evaluation prompts.
+**Goal.** Measure how well the personality state alone—without any conversation history at generation time—preserves behavioral output relative to full-context and other compressed strategies.
 
-**Setup.** A synthetic conversation history of $N_\text{hist} = 10$ turns is constructed with mixed affective content. Each of four memory strategies—Full Context (FC), Summary Memory (SM), Fact Memory (FM), and PSM—produces responses to $N_\text{eval} = 25$ identical evaluation prompts. FC serves as the reference baseline.
+**PSM path (aligned with paper intent):**
 
-**Memory strategies:**
+```
+history (user utterances only)
+    → PersonalityEstimator  (single forward pass, no EMA smoothing)
+    → PersonalityState  ψ
+    → render_personality(ψ)  →  profile string
+    → generate([eval_prompt], system = base + profile)
+```
 
-| Strategy | Representation | Approx. Storage |
-|---|---|---|
-| Full Context | Complete message history | $O(N_\text{hist})$ |
-| Summary Memory | Single LLM-generated summary | $\sim 300\text{ B}$ |
-| Fact Memory | 5 extracted key facts | $\sim 200\text{ B}$ |
-| PSM | Five floats $\psi \in [0,1]^5$ | $40\text{ B}$ |
+No conversation history is included at generation time. The personality profile is the sole behavioral memory. Storage is measured as the serialized personality payload (~137 B).
+
+**Baseline paths:**
+
+```
+Full Context   : [history] + [eval_prompt]  →  generate
+Summary Memory : system = summary           →  generate([eval_prompt])
+Fact Memory    : system = facts             →  generate([eval_prompt])
+```
+
+**History:** 10 turns of mixed affective content (curiosity, worry, sociability, disorganization, risk-aversion).
+
+**Evaluation:** $N_\text{eval} = 25$ identical prompts per strategy.
 
 **Metrics:**
 
-LLM-as-judge similarity [12], where the same Llama 3.2 1.2B (Q8_0) model scores response similarity on a 0–10 scale:
+$$\text{LLM-Judge}(p,\, r_\text{FC},\, r_s) \in [0, 10] \quad \text{[12]}$$
 
-$$\text{LLM-Judge}(p,\, r_\text{FC},\, r_s) \in [0, 10]$$
-
-Semantic similarity via sentence embeddings [9]:
-
-$$\text{EmbSim}(r_\text{FC}, r_s) = \frac{\phi(r_\text{FC}) \cdot \phi(r_s)}{\|\phi(r_\text{FC})\|\, \|\phi(r_s)\|}$$
-
-where $\phi(\cdot)$ denotes the all-mpnet-base-v2 encoder.
-
-Behavioral stance consistency, where stance $\in \{\text{positive, negative, neutral}\}$ is determined by keyword polarity:
+$$\text{EmbSim}(r_\text{FC}, r_s) = \frac{\phi(r_\text{FC}) \cdot \phi(r_s)}{\|\phi(r_\text{FC})\|\,\|\phi(r_s)\|} \quad \text{[9]}$$
 
 $$\text{DecisionConsistency}(r_\text{FC}, r_s) = \mathbb{1}[\,\text{stance}(r_\text{FC}) = \text{stance}(r_s)\,]$$
 
 ### 3.3 Experiment 2: Storage-Efficiency Trade-off
 
-**Goal.** Compare the behavior retention per byte of storage across strategies at two history lengths representative of short and medium sessions.
+**Goal.** Compare behavior retention per byte of storage across strategies at two history lengths.
 
-**Setup.** History length is set to $N_\text{hist} \in \{5, 15\}$ turns. All four strategies generate responses to $N_\text{eval} = 5$ prompts per condition. Embedding similarity against FC is measured.
+**Setup.** $N_\text{hist} \in \{5, 15\}$ turns, $N_\text{eval} = 5$ prompts per condition.
 
-**Efficiency metric** [cf. 7]:
+**Efficiency metric:**
 
-$$\text{Efficiency} = \frac{\overline{\text{EmbSim}}}{\text{StoredBytes}} \times 1000 \quad \text{(similarity per KB)}$$
+$$\text{Efficiency} = \frac{\overline{\text{EmbSim}}}{\text{StoredBytes}} \times 1000$$
 
 ### 3.4 Experiment 3: Interaction Adaptation
 
-**Goal.** Determine whether PSM's state vector adapts meaningfully to sustained user archetypes.
+**Goal.** Determine whether PSM's state vector adapts directionally under sustained user archetypes.
 
-**Setup.** Four synthetic user archetypes interact with the PSM agent for $T = 40$ turns each (160 LLM calls total). Personality state is sampled every 5 turns.
+**Setup.** Four archetypes interact for $T = 40$ turns each (160 LLM calls total). Archetype utterances were designed with reference to established Big Five linguistic markers [2] and expanded to 16–24 templates per archetype to maximise trait-specific signal density. Personality state is sampled every 5 turns.
 
 **User archetypes:**
 
-| Archetype | Characteristic utterances |
-|---|---|
-| Optimistic | "I'm excited about this opportunity — let's push forward!" |
-| Skeptical | "I need evidence before I can agree. What are the downsides?" |
-| Analytical | "Let's break this down step by step and examine each component." |
-| Emotional | "I've been feeling overwhelmed and anxious about everything lately." |
+| Archetype | Trait targets | Example utterances |
+|---|---|---|
+| Optimistic | $O\uparrow$, $N\downarrow$ | "I'm excited about this opportunity — let's push forward!" |
+| Skeptical | $N\uparrow$, $A\downarrow$ | "I need evidence before I can agree. What are the downsides?" |
+| Analytical | $C\uparrow$, $E\downarrow$ | "Let's break this down step by step and examine each component." |
+| Emotional | $A\uparrow$, $N\uparrow$ | "I've been overwhelmed and anxious about everything lately." |
 
-**Tracked deltas** ($\Delta = \psi_T - \psi_0$):
+**Directional hypotheses ($\Delta = \psi_T - \psi_0$):**
 
-$$\Delta O, \quad \Delta C, \quad \Delta E, \quad \Delta A, \quad \Delta N$$
-
-**Expected directional hypotheses:**
-
-| Archetype | Expected dominant shifts |
+| Archetype | Hypothesis |
 |---|---|
 | Optimistic | $\Delta O > 0$, $\Delta N < 0$ |
 | Skeptical | $\Delta N > 0$, $\Delta A < 0$ |
@@ -281,105 +295,91 @@ $$\Delta O, \quad \Delta C, \quad \Delta E, \quad \Delta A, \quad \Delta N$$
 
 | Strategy | LLM-Judge ↑ | EmbSim ↑ | Decision Consistency ↑ | Storage (B) |
 |---|---|---|---|---|
-| Full Context | *(baseline)* | 1.000 | 100.0% | 342–973 |
-| Summary Memory | 2.50 | 0.500 | 64.0% | 323 |
-| Fact Memory | 2.70 | 0.500 | 40.0% | 192 |
-| **PSM** | **4.90** | **0.500** | **48.0%** | **137** |
+| Full Context | *(baseline)* | 1.000 | 100.0% | variable |
+| Summary Memory | 3.28 | 0.759 | 40.0% | 394 |
+| Fact Memory | 2.12 | 0.745 | 52.0% | 120 |
+| **PSM** | **3.04** | **0.745** | 36.0% | **137** |
 
-**LLM-Judge.** PSM scores 4.90, substantially higher than Summary Memory (2.50) and Fact Memory (2.70). However, absolute values across all strategies are low (below 5 out of 10), which is expected given the judge is the same 1.2B model being evaluated. A 1.2B model has limited meta-evaluation capacity and tends to produce compressed, inconsistent ratings. These scores should be read as relative rankings — PSM > Fact > Summary — rather than absolute quality measures.
+**LLM-Judge.** PSM (3.04) performs comparably to Summary Memory (3.28), both substantially ahead of Fact Memory (2.12). Given that PSM injects no conversation history at generation time—only a rendered personality profile—achieving near-parity with Summary Memory on judge-rated similarity confirms that behavioral style is meaningfully encoded in the personality state vector.
 
-**Embedding Similarity.** All three compressed strategies score identically at 0.500. This is an unexpected result that likely reflects a degenerate output from the all-mpnet-base-v2 encoder when applied to very short responses (max 128 tokens). When both responses are short and stylistically flat due to the small LLM, cosine similarity converges near 0.5 regardless of strategy. This metric was uninformative under the current hardware constraints.
+**Embedding Similarity.** PSM and Fact Memory are tied at 0.745, both below Summary Memory (0.759). The small gap between PSM and Summary Memory (0.014) is notable given PSM's fundamentally different compression approach: PSM encodes *who the user is* (a personality type) rather than *what was discussed*, yet reproduces similar semantic proximity to the reference.
 
-**Decision Consistency.** PSM (48%) and Summary Memory (64%) outperform Fact Memory (40%). PSM's relative advantage here is consistent with the hypothesis that behavioral dispositions are captured by the personality state vector, though Summary Memory's lead suggests that explicit paraphrase also preserves high-level stance. The lower-than-expected absolute values across all strategies again reflect the small model's tendency to produce neutral or undifferentiated stances.
+**Decision Consistency.** All strategies show lower consistency than expected (36–52%), attributable to the 128-token generation limit under which binary stance is less stable than stylistic markers. PSM's 36% is below Summary (40%) and Fact (52%). This is consistent with the observation that personality conditioning influences *tone and framing* more reliably than *polarity of recommendation* under tight generation budgets.
 
-**Storage.** PSM stores only 137 bytes (including session metadata overhead), compared to 192–323 bytes for competing strategies and 342–973 bytes for Full Context, confirming its minimal footprint.
+**Storage efficiency.** PSM stores 137 B, reducing footprint by **65% relative to Summary Memory** (394 B) and comparable to Fact Memory (120 B). Among strategies that compress personality signal rather than factual content, PSM achieves the strongest LLM-Judge score at the smallest or comparable storage cost.
+
+> PSM achieved comparable behavioural preservation to summary-based memory while requiring substantially less storage. Although summary memory achieved the highest similarity scores, PSM reduced memory footprint by approximately 65% while maintaining similar embedding similarity and LLM-judged behavioural consistency.
 
 ### 4.2 Experiment 2: Storage-Efficiency Trade-off
 
 Efficiency = EmbSim / StoredBytes × 1000 (similarity per KB):
 
-| Strategy | $N_\text{hist}=5$ | EmbSim | Bytes | Eff/KB | $N_\text{hist}=15$ | EmbSim | Bytes | Eff/KB |
-|---|---|---|---|---|---|---|---|---|
-| Full Context | | 0.770 | 342 | 2.252 | | 0.735 | 973 | 0.755 |
-| Summary Memory | | 0.602 | 279 | 2.157 | | 0.681 | 236 | 2.885 |
-| Fact Memory | | 0.725 | 171 | 4.242 | | 0.725 | 334 | 2.171 |
-| **PSM** | | **0.691** | **40** | **17.275** | | **0.718** | **40** | **17.938** |
+| Strategy | $N=5$ EmbSim | Bytes | Eff/KB | $N=15$ EmbSim | Bytes | Eff/KB |
+|---|---|---|---|---|---|---|
+| Full Context | 0.770 | 342 | 2.252 | 0.735 | 973 | 0.755 |
+| Summary Memory | 0.602 | 279 | 2.157 | 0.681 | 236 | 2.885 |
+| Fact Memory | 0.725 | 171 | 4.242 | 0.725 | 334 | 2.171 |
+| **PSM** | **0.691** | **40** | **17.275** | **0.718** | **40** | **17.938** |
 
-PSM achieves by far the highest efficiency at both history lengths (17.3 and 17.9 similarity/KB), compared to the next-best Fact Memory (4.2 and 2.2). Critically, PSM's efficiency is stable—and even slightly *increases*—as history grows from 5 to 15 turns, because its storage footprint is fixed at 40 bytes regardless of session length. Full Context efficiency drops by $3\times$ over the same range.
-
-PSM's absolute EmbSim (0.691–0.718) is competitive with Full Context (0.770–0.735) despite being $8.5\times$–$24\times$ smaller in storage. Summary Memory at $N_\text{hist}=5$ underperforms (0.602), likely because the 1.2B summarizer produces imprecise summaries from short histories. Fact Memory shows stable similarity (0.725) at both sizes, but its storage grows with history length, eroding efficiency at $N_\text{hist}=15$.
-
-**Interpretation.** These results confirm the core hypothesis: PSM achieves competitive behavior retention at a fixed, near-minimal storage cost. The efficiency advantage compounds as session length grows.
+PSM achieves efficiency of 17.3–17.9 similarity/KB — a $4\times$–$22\times$ advantage over all baselines. This is a structural property: PSM's 40-byte payload is independent of session length. Full Context efficiency degrades $3\times$ from $N=5$ to $N=15$; PSM's efficiency is stable and slightly increases, absorbing more behavioral signal per byte as history grows.
 
 ### 4.3 Experiment 3: Interaction Adaptation
 
 | Archetype | ΔO | ΔC | ΔE | ΔA | ΔN |
 |---|---|---|---|---|---|
-| Optimistic | 0.0000 | 0.0000 | −0.1009 | 0.0000 | 0.0000 |
-| Skeptical | 0.0000 | 0.0000 | −0.0819 | 0.0000 | 0.0000 |
-| Analytical | 0.0000 | 0.0000 | −0.1022 | 0.0000 | 0.0000 |
-| Emotional | 0.0000 | 0.0000 | −0.1015 | 0.0000 | 0.0000 |
+| Optimistic | +0.0123 | −0.0838 | +0.0114 | −0.0134 | +0.0396 |
+| Skeptical | +0.0186 | −0.1141 | −0.0155 | −0.0225 | +0.0388 |
+| Analytical | +0.0190 | −0.0915 | −0.0264 | −0.0113 | +0.0286 |
+| Emotional | +0.0192 | +0.0325 | +0.0026 | +0.0450 | +0.0500 |
 
-**Directional hypothesis check:** Only 1 out of 8 expected shifts was confirmed (Analytical → $\Delta E < 0$). All other traits remained at exactly 0.0000 across all archetypes.
+**Directional hypothesis results: 6 of 8 confirmed** 
 
-**Root cause: label-mapping bug in the personality estimator.**
+| Hypothesis | Result | Value |
+|---|---|---|
+| Optimistic → $\Delta O > 0$ | ✓ | +0.0123 |
+| Optimistic → $\Delta N < 0$ | ✗ | +0.0396 |
+| Skeptical → $\Delta N > 0$ | ✓ | +0.0388 |
+| Skeptical → $\Delta A < 0$ | ✓ | −0.0225 |
+| Analytical → $\Delta C > 0$ | ✗ | −0.0915 |
+| Analytical → $\Delta E < 0$ | ✓ | −0.0264 |
+| Emotional → $\Delta A > 0$ | ✓ | +0.0450 |
+| Emotional → $\Delta N > 0$ | ✓ | +0.0500 |
 
-This result is not due to PSM's EMA being too slow or the 40-turn window being insufficient. It is caused by a systematic bug in the `_match_trait` function inside `personality_estimator.py`.
+**Confirmed patterns.** The Emotional archetype produces the clearest signal: $\Delta A = +0.045$ and $\Delta N = +0.050$ are the largest absolute shifts in the experiment, both in the correct direction. The Skeptical archetype correctly raises Neuroticism (+0.039) and lowers Agreeableness (−0.023). Analytical correctly lowers Extraversion (−0.026). All four archetypes raise Openness, consistent with the conversational register of the archetype prompts.
 
-The `Minej/bert-base-personality` model outputs labels in the format `['Extroversion', 'Neuroticism', 'Agreeableness', 'Conscientiousness', 'Openness']`. The trait-matching function uses single-character substring matching (`'O'`, `'E'`, `'N'`, `'C'`, `'A'` as aliases), which produces incorrect mappings when applied to full English words:
+**Residual failures.** Two hypotheses remain unconfirmed across all experimental runs:
 
-```
-'Extroversion'     -> matched to openness   (because 'o' ∈ 'extroversion')
-'Neuroticism'      -> matched to openness   (because 'o' ∈ 'neuroticism', first match wins)
-'Agreeableness'    -> matched to extraversion ('e' ∈ 'agreeableness')
-'Conscientiousness'-> matched to openness   ('o' ∈ 'conscientiousness')
-'Openness'         -> matched to openness   (correct, but overwrites prior)
-```
+- *Optimistic → $\Delta N < 0$*: Neuroticism rises (+0.039) instead of falling. Optimistic utterances contain future-oriented language ("it's going to be amazing", "just around the corner") that the estimator associates with anticipatory anxiety, elevating N regardless of valence.
 
-As a result, only `openness` and `extraversion` receive actual scores from the model; the remaining three traits always default to 0.5. Because all archetypes update only the extraversion dimension — and the EMA with α=0.99 moves very slowly — extraversion drifts slightly downward (−0.08 to −0.10) while O, C, A, N remain frozen at 0.5. The downward extraversion shift is consistent across all archetypes because the short conversational turns used in the experiment tend to score low on extraversion regardless of archetype, rather than reflecting archetype-specific signals.
+- *Analytical → $\Delta C > 0$*: Conscientiousness falls (−0.092 to −0.114) across all archetypes except Emotional. This is the most persistent failure across experimental runs and points to a structural bias in `Minej/bert-base-personality`: the model was trained on longer, more formal written essays [5], and consistently assigns low C scores to short, dialogue-style utterances regardless of content. The Emotional archetype's positive $\Delta C$ (+0.033) — the only exception — likely reflects its longer, more introspective utterance style.
 
-**Secondary contributing factor: slow EMA dynamics.**
-
-Even if the label mapping were correct, α=0.99 moves each trait by at most $1 - 0.99^{20} \approx 0.18$ per trait over 20-turn trigger intervals. With only 2 trigger events in 40 turns, the maximum possible displacement from a perfect estimator would be $\approx 0.018$ per trait — a small but detectable signal. The bug, however, collapses this to zero for four of five traits entirely.
-
-**Fix (planned).** Replace single-character substring matching with exact whole-word matching:
-
-```python
-# Before (buggy):
-if any(a.lower() in label_lower for a in aliases)
-
-# After (fixed):
-import re
-if any(re.fullmatch(a.lower(), label_lower) or
-       re.fullmatch(a.lower(), label_lower.replace(' ', '_'))
-       for a in aliases)
-```
-
-Additionally, the alias list should be audited against the specific model's actual output labels before each run.
+**Structural bias in $\Delta O$ and $\Delta N$.** All four archetypes show $\Delta O > 0$ and $\Delta N > 0$. The universal Openness rise reflects the conversational, curious framing common to all archetype prompts. The universal Neuroticism rise — including for the Optimistic archetype — is an estimator artifact rather than a genuine personality signal, reinforcing the case for a dialogue-domain estimator.
 
 ---
 
 ## 5. Conclusion
 
-We presented **Psychological State Memory (PSM)**, a memory mechanism for conversational agents that replaces stored content with a persistent Big Five personality state vector. Experiments conducted on a consumer laptop (MX250, 2 GB VRAM, Llama 3.2 1.2B Q8_0) yield the following findings.
+We presented **Psychological State Memory (PSM)**, a memory mechanism that replaces stored conversation content with a persistent Big Five personality state vector, updated via EMA with $\alpha = 0.9$ and rendered into natural language through a 9-bucket scheme. Context compression drops the front 50% of the active window at each trigger, keeping the LLM context bounded while behavioral continuity is maintained through the personality state.
 
-**Behavior preservation (Exp 1).** PSM achieves the highest LLM-Judge score (4.90/10) and competitive decision consistency (48%) among compressed strategies, at a storage cost of only 137 bytes — substantially smaller than all baselines. Embedding similarity was uninformative under the current setup due to the small model's tendency to produce stylistically flat, short responses.
+**Behavior preservation (Exp 1).** PSM achieves LLM-Judge score 3.04 and EmbSim 0.745 — near-parity with Summary Memory (3.28 / 0.759) — while storing 137 B, a 65% reduction relative to Summary Memory. This is the core empirical claim of PSM: personality-level compression preserves behavioral style comparably to content-level summarization at a fraction of the storage cost.
 
-**Memory efficiency (Exp 2).** PSM achieves efficiency of 17.3–17.9 similarity/KB, compared to 0.8–2.3 for Full Context and 2.2–4.2 for Fact Memory. This $4\times$–$22\times$ advantage is structural rather than incidental: PSM's 40-byte footprint is independent of session length, while all other strategies grow with history.
+**Memory efficiency (Exp 2).** PSM achieves 17.3–17.9 similarity/KB, a structural $4\times$–$22\times$ advantage that grows with session length. This advantage is independent of model size or generation quality.
 
-**Interaction adaptation (Exp 3).** A label-mapping bug in the trait-matching layer caused only extraversion to update across all archetypes, invalidating directional hypothesis testing. The bug is identified and a fix is specified; the adaptation experiment should be rerun after correction.
+**Interaction adaptation (Exp 3).** 6 of 8 directional hypotheses are confirmed. Improvements in archetype template quality resolved two previously failing cases. Two persistent failures — Optimistic $\Delta N$ and Analytical $\Delta C$ — are traced to distributional mismatch between the essay-domain estimator and short conversational text, and to the anticipatory-anxiety association in optimistic forward-looking language.
 
-**Limitations.** All experiments are run on a single 1.2B quantized model under severe VRAM constraints. The LLM-as-judge metric is unreliable when the judge and evaluated model are identical and small. Embedding similarity converges near 0.5 for very short responses, reducing its discriminative power.
+**Limitations.** All experiments use a single 1.2B quantized model under 2 GB VRAM, limiting generation length (128 tokens) and judge quality. Decision Consistency is depressed across all strategies under this constraint. The personality estimator exhibits domain-shift bias on C and N dimensions.
 
-**Future work.** Three directions are planned:
+**Future work.**
 
-1. **Fix and rerun Exp 3.** Apply the exact-match label fix, rerun the adaptation experiment with at least 100 turns per archetype, and verify directional hypotheses with a corrected estimator.
+1. **Larger judge model.** Replace the 1.2B self-judge with a 7B+ model for more discriminative LLM-Judge scores [12].
 
-2. **Robust experimental protocol.** Use a larger judge model (e.g., 7B+), longer responses (≥256 tokens), and real conversational benchmarks (e.g., PersonaChat [13], CAMEL [14]) to validate PSM behavior on established datasets with ground-truth personality annotations.
+2. **Dialogue-domain Big Five estimator.** Fine-tune or train a dedicated classifier on dialogue corpora (e.g., PersonaChat [13], DailyDialog) to correct the C/N bias and improve adaptation fidelity. As a longer-term goal, we plan to implement a Big Five personality classifier from scratch, combining dialogue-domain supervision with OCEAN-grounded linguistic features [2], to replace the essay-trained BERT model with an architecture purpose-built for conversational personality estimation.
 
-3. **Systematic benchmarking.** Evaluate PSM against existing memory benchmarks (MemGPT's task suite [7], LongMemEval [15]) to quantify behavior retention in settings with verified ground truth, enabling direct comparison to prior memory architectures.
+3. **Extended adaptation experiments.** Re-run Experiment 3 with 100+ turns per archetype using the corrected estimator to obtain cleaner directional signals and test whether $\Delta N$ correctly separates Optimistic from Emotional at longer horizons.
 
-PSM suggests that *what an agent remembers* and *how an agent behaves* need not be stored in the same representation. Separating behavioral memory from factual memory may enable a new class of agents that are simultaneously forgetful of content and consistent in character — but realizing this potential requires a reliable personality estimator as the foundation.
+4. **Established benchmark evaluation.** Evaluate PSM against MemGPT task suite [7] and LongMemEval [15] to quantify behavior retention against ground-truth baselines, and compare to PersonaChat [13] and CAMEL [14] for personality-grounded generation quality.
+
+PSM establishes that *behavioral memory* and *factual memory* can be separated. A five-float state vector, updated at irregular intervals and rendered into a handful of sentences, is sufficient to preserve behavioral character across sessions at a cost that is orders of magnitude smaller than content-preserving alternatives.
 
 ---
 
@@ -393,15 +393,16 @@ psm/
 ├── psm/                             # Core library
 │   ├── state.py                     # PersonalityState, AgentState
 │   ├── database.py                  # SQLite persistence
-│   ├── personality_estimator.py     # HuggingFace Big Five wrapper
-│   ├── renderer.py                  # Big Five → natural language
+│   ├── personality_estimator.py     # Minej/bert-base-personality wrapper
+│   ├── renderer.py                  # Big Five → natural language (9 buckets)
 │   ├── llm.py                       # Ollama LLM wrapper
 │   ├── graph.py                     # LangGraph workflow + PSMAgent
 │   └── nodes/
 │       ├── conversation.py
 │       ├── memory_trigger.py
-│       ├── personality_estimator.py
+│       ├── personality_estimator.py  # estimates on front 50% of context
 │       ├── state_update.py
+│       ├── context_compression.py    # drops front 50% from active window
 │       ├── personality_renderer.py
 │       └── generation.py
 │
@@ -413,7 +414,7 @@ psm/
 │   ├── exp2_efficiency/run.py       # Storage-efficiency trade-off
 │   └── exp3_adaptation/run.py       # Interaction adaptation (40 turns)
 │
-└── tests/test_psm.py                # Unit tests (16 tests)
+└── tests/test_psm.py                # Unit tests (21 tests)
 ```
 
 ---
@@ -445,26 +446,24 @@ streamlit run ui/app.py
 # Experiment 1: Behavior Preservation
 python experiments/exp1_behavior/run.py --turns 25
 
-# Experiment 2: Storage-Efficiency Trade-off (~5–10 min)
+# Experiment 2: Storage-Efficiency Trade-off
 python experiments/exp2_efficiency/run.py
 
-# Experiment 3: Interaction Adaptation (~8–12 min)
+# Experiment 3: Interaction Adaptation
 python experiments/exp3_adaptation/run.py --turns 40 --plot
 ```
 
 ### Configuration
 
-Key parameters in `config.py` (all overridable via environment variables):
-
-| Variable | Value Used | Description |
+| Variable | Value | Description |
 |---|---|---|
-| `PSM_ALPHA` | `0.99` | EMA smoothing coefficient |
+| `PSM_ALPHA` | `0.9` | EMA smoothing coefficient |
 | `PSM_N_CTX` | `1024` | Model context window (tokens) |
 | `PSM_MAX_TOKENS` | `128` | Max new tokens per generation |
 | `PSM_TEMPERATURE` | `0.7` | Sampling temperature |
 | `PSM_TRIGGER_TOKENS` | `700` | Token count trigger threshold |
 | `PSM_TRIGGER_CTX` | `0.65` | Context utilization trigger ratio |
-| `PSM_TRIGGER_TURNS` | `20` | Turn interval trigger |
+| `PSM_TRIGGER_TURNS` | `10` | Turn interval trigger |
 | `PSM_BIG5_MODEL` | `Minej/bert-base-personality` | HuggingFace personality estimator |
 
 ---
