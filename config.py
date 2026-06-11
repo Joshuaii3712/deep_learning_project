@@ -35,7 +35,7 @@ ALPHA: float = float(os.getenv("PSM_ALPHA", "0.5"))  # EMA smoothing factor
 # ── Memory trigger thresholds ─────────────────────────────────────────────────
 TRIGGER_TOKEN_LIMIT: int = int(os.getenv("PSM_TRIGGER_TOKENS", "700"))
 TRIGGER_CONTEXT_RATIO: float = float(os.getenv("PSM_TRIGGER_CTX", "0.65"))
-TRIGGER_TURN_LIMIT: int = int(os.getenv("PSM_TRIGGER_TURNS", "20"))
+TRIGGER_TURN_LIMIT: int = int(os.getenv("PSM_TRIGGER_TURNS", "10"))
 
 # ── Default personality (neutral 0.5 for all traits) ─────────────────────────
 DEFAULT_PERSONALITY: dict[str, float] = {

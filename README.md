@@ -10,10 +10,12 @@ A Psychological Approach to Long-Term Memory
 ### Content:
 (see below)
 
+[*Project setup is below the content]
+
 ---
 
 
-# Psychological State Memory (PSM): Behavior-Preserving Psychological Compression for Long-Term Conversational Agents
+# Psychological State Memory (PSM): Psychological State Memory: A Behavior-Preserving Memory Compression Framework for LLMs
 
 > **Abstract.** Long-term conversational agents typically maintain context through retrieval, summarization, or external memory stores. While these approaches preserve factual information, they often fail to capture how prolonged interactions shape an agent's behavioral tendencies. We introduce **Psychological State Memory (PSM)**, a lightweight memory mechanism that compresses conversation histories into a five-dimensional persistent psychological state based on the Big Five personality model. Instead of storing facts or summaries, PSM models stable behavioral dispositions—curiosity, conscientiousness, expressiveness, warmth, and emotional reactivity—and periodically updates them via a streaming personality estimator. The resulting state vector is rendered into natural language and injected into the system prompt, enabling behavioral consistency across long sessions while requiring only five floating-point values as persistent memory. We evaluate PSM against summary-based and fact-centric memory on behavior preservation and memory efficiency, and additionally examine whether the state vector adapts directionally under sustained interaction styles. PSM achieves comparable behavioral preservation to summary-based memory while reducing storage footprint by approximately 65%, and correctly predicts 6 of 8 directional personality adaptation hypotheses. The two remaining failures are traced to a systematic bias in the BERT-based estimator on the Conscientiousness and Neuroticism dimensions under short conversational text, establishing a clear agenda for future estimator development.
 
@@ -42,9 +44,9 @@ We ask: *can a conversational agent's effective memory be represented not as sto
 
 The key contributions of this work are:
 
-- A lightweight psychological memory architecture requiring only five floating-point values of persistent storage per session.
+- A lightweight psychological memory architecture requiring only five floating-point values of persistent storage.
 - A trigger-based update mechanism with context compression: when a trigger fires, the front 50% of the active message window is absorbed into the personality state and removed from the LLM context, keeping the context window bounded while preserving behavioral continuity.
-- A 9-bucket rendering scheme providing finer-grained natural-language differentiation of personality states than conventional 5-bucket approaches.
+- A 9-bucket rendering scheme providing fine-grained natural-language differentiation of personality states
 - Empirical comparison of PSM against two compressed memory baselines on behavior preservation and storage efficiency.
 - Identification of residual estimator biases in Conscientiousness and Neuroticism, and a concrete agenda for future estimator development including training a dedicated dialogue-domain Big Five classifier.
 
