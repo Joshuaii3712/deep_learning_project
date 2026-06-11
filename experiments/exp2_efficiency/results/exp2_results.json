@@ -1,0 +1,381 @@
+{
+  "config": {
+    "history_sizes": [
+      5,
+      15
+    ],
+    "n_prompts": 5
+  },
+  "results": [
+    {
+      "history_turns": 5,
+      "strategy": "full_context",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.74,
+      "storage_bytes": 342,
+      "efficiency_per_kb": 2.1638
+    },
+    {
+      "history_turns": 5,
+      "strategy": "summary_memory",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.5258,
+      "storage_bytes": 279,
+      "efficiency_per_kb": 1.8848
+    },
+    {
+      "history_turns": 5,
+      "strategy": "fact_memory",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.5893,
+      "storage_bytes": 171,
+      "efficiency_per_kb": 3.446
+    },
+    {
+      "history_turns": 5,
+      "strategy": "psm",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.7281,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 18.2033
+    },
+    {
+      "history_turns": 5,
+      "strategy": "full_context",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.7442,
+      "storage_bytes": 342,
+      "efficiency_per_kb": 2.1759
+    },
+    {
+      "history_turns": 5,
+      "strategy": "summary_memory",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.5463,
+      "storage_bytes": 279,
+      "efficiency_per_kb": 1.9579
+    },
+    {
+      "history_turns": 5,
+      "strategy": "fact_memory",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.6959,
+      "storage_bytes": 171,
+      "efficiency_per_kb": 4.0694
+    },
+    {
+      "history_turns": 5,
+      "strategy": "psm",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.5935,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 14.8364
+    },
+    {
+      "history_turns": 5,
+      "strategy": "full_context",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.7442,
+      "storage_bytes": 342,
+      "efficiency_per_kb": 2.176
+    },
+    {
+      "history_turns": 5,
+      "strategy": "summary_memory",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.6491,
+      "storage_bytes": 279,
+      "efficiency_per_kb": 2.3266
+    },
+    {
+      "history_turns": 5,
+      "strategy": "fact_memory",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.7775,
+      "storage_bytes": 171,
+      "efficiency_per_kb": 4.5465
+    },
+    {
+      "history_turns": 5,
+      "strategy": "psm",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.8094,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 20.2353
+    },
+    {
+      "history_turns": 5,
+      "strategy": "full_context",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.7764,
+      "storage_bytes": 342,
+      "efficiency_per_kb": 2.2701
+    },
+    {
+      "history_turns": 5,
+      "strategy": "summary_memory",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.5923,
+      "storage_bytes": 279,
+      "efficiency_per_kb": 2.123
+    },
+    {
+      "history_turns": 5,
+      "strategy": "fact_memory",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.799,
+      "storage_bytes": 171,
+      "efficiency_per_kb": 4.6723
+    },
+    {
+      "history_turns": 5,
+      "strategy": "psm",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.6868,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 17.1702
+    },
+    {
+      "history_turns": 5,
+      "strategy": "full_context",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.8456,
+      "storage_bytes": 342,
+      "efficiency_per_kb": 2.4726
+    },
+    {
+      "history_turns": 5,
+      "strategy": "summary_memory",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.6958,
+      "storage_bytes": 279,
+      "efficiency_per_kb": 2.4939
+    },
+    {
+      "history_turns": 5,
+      "strategy": "fact_memory",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.7654,
+      "storage_bytes": 171,
+      "efficiency_per_kb": 4.4761
+    },
+    {
+      "history_turns": 5,
+      "strategy": "psm",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.6372,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 15.9294
+    },
+    {
+      "history_turns": 15,
+      "strategy": "full_context",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.6883,
+      "storage_bytes": 973,
+      "efficiency_per_kb": 0.7074
+    },
+    {
+      "history_turns": 15,
+      "strategy": "summary_memory",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.8259,
+      "storage_bytes": 236,
+      "efficiency_per_kb": 3.4995
+    },
+    {
+      "history_turns": 15,
+      "strategy": "fact_memory",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.7404,
+      "storage_bytes": 334,
+      "efficiency_per_kb": 2.2169
+    },
+    {
+      "history_turns": 15,
+      "strategy": "psm",
+      "prompt": "What's the best way to approach a new challenge?",
+      "similarity": 0.8078,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 20.1945
+    },
+    {
+      "history_turns": 15,
+      "strategy": "full_context",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.6477,
+      "storage_bytes": 973,
+      "efficiency_per_kb": 0.6657
+    },
+    {
+      "history_turns": 15,
+      "strategy": "summary_memory",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.6174,
+      "storage_bytes": 236,
+      "efficiency_per_kb": 2.6163
+    },
+    {
+      "history_turns": 15,
+      "strategy": "fact_memory",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.5708,
+      "storage_bytes": 334,
+      "efficiency_per_kb": 1.709
+    },
+    {
+      "history_turns": 15,
+      "strategy": "psm",
+      "prompt": "How do you stay motivated when things feel uncertain?",
+      "similarity": 0.5516,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 13.7889
+    },
+    {
+      "history_turns": 15,
+      "strategy": "full_context",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.7733,
+      "storage_bytes": 973,
+      "efficiency_per_kb": 0.7947
+    },
+    {
+      "history_turns": 15,
+      "strategy": "summary_memory",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.7738,
+      "storage_bytes": 236,
+      "efficiency_per_kb": 3.2789
+    },
+    {
+      "history_turns": 15,
+      "strategy": "fact_memory",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.7571,
+      "storage_bytes": 334,
+      "efficiency_per_kb": 2.2669
+    },
+    {
+      "history_turns": 15,
+      "strategy": "psm",
+      "prompt": "Should I take a risk on something new?",
+      "similarity": 0.8119,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 20.2979
+    },
+    {
+      "history_turns": 15,
+      "strategy": "full_context",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.8302,
+      "storage_bytes": 973,
+      "efficiency_per_kb": 0.8532
+    },
+    {
+      "history_turns": 15,
+      "strategy": "summary_memory",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.55,
+      "storage_bytes": 236,
+      "efficiency_per_kb": 2.3303
+    },
+    {
+      "history_turns": 15,
+      "strategy": "fact_memory",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.8036,
+      "storage_bytes": 334,
+      "efficiency_per_kb": 2.406
+    },
+    {
+      "history_turns": 15,
+      "strategy": "psm",
+      "prompt": "How do you balance caution with optimism?",
+      "similarity": 0.6261,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 15.6536
+    },
+    {
+      "history_turns": 15,
+      "strategy": "full_context",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.7338,
+      "storage_bytes": 973,
+      "efficiency_per_kb": 0.7541
+    },
+    {
+      "history_turns": 15,
+      "strategy": "summary_memory",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.6377,
+      "storage_bytes": 236,
+      "efficiency_per_kb": 2.7023
+    },
+    {
+      "history_turns": 15,
+      "strategy": "fact_memory",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.7534,
+      "storage_bytes": 334,
+      "efficiency_per_kb": 2.2557
+    },
+    {
+      "history_turns": 15,
+      "strategy": "psm",
+      "prompt": "What matters most when making an important decision?",
+      "similarity": 0.7903,
+      "storage_bytes": 40,
+      "efficiency_per_kb": 19.7572
+    }
+  ],
+  "summary": {
+    "full_context": {
+      "5": {
+        "mean_similarity": 0.7701,
+        "storage_bytes": 342,
+        "mean_efficiency_per_kb": 2.2517
+      },
+      "15": {
+        "mean_similarity": 0.7347,
+        "storage_bytes": 973,
+        "mean_efficiency_per_kb": 0.755
+      }
+    },
+    "summary_memory": {
+      "5": {
+        "mean_similarity": 0.6019,
+        "storage_bytes": 279,
+        "mean_efficiency_per_kb": 2.1572
+      },
+      "15": {
+        "mean_similarity": 0.681,
+        "storage_bytes": 236,
+        "mean_efficiency_per_kb": 2.8855
+      }
+    },
+    "fact_memory": {
+      "5": {
+        "mean_similarity": 0.7254,
+        "storage_bytes": 171,
+        "mean_efficiency_per_kb": 4.2421
+      },
+      "15": {
+        "mean_similarity": 0.7251,
+        "storage_bytes": 334,
+        "mean_efficiency_per_kb": 2.1709
+      }
+    },
+    "psm": {
+      "5": {
+        "mean_similarity": 0.691,
+        "storage_bytes": 40,
+        "mean_efficiency_per_kb": 17.2749
+      },
+      "15": {
+        "mean_similarity": 0.7175,
+        "storage_bytes": 40,
+        "mean_efficiency_per_kb": 17.9384
+      }
+    }
+  }
+}
