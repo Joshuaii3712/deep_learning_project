@@ -5,7 +5,7 @@ Implementation of Psychological State Memory for LLM Chatbots:
 A Psychological Approach to Long-Term Memory
 
 ### YouTube Link:
-(TBD)
+(https://youtu.be/V4NgTfInonQ)
 
 ### Content:
 (see below)
